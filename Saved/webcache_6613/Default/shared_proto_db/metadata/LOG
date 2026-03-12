@@ -1,2 +1,3 @@
-2026/03/12-19:03:12.308 1834 Creating DB C:\Users\a\Documents\GitHub\DeepSea\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata since it was missing.
-2026/03/12-19:03:12.313 1834 Reusing MANIFEST C:\Users\a\Documents\GitHub\DeepSea\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata/MANIFEST-000001
+2026/03/12-19:25:59.060 67c Reusing MANIFEST C:\Users\a\Documents\GitHub\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata/MANIFEST-000001
+2026/03/12-19:25:59.060 67c Recovering log #3
+2026/03/12-19:25:59.060 67c Reusing old log C:\Users\a\Documents\GitHub\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata/000003.log 
