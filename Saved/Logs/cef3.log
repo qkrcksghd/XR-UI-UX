@@ -1,6 +1,11 @@
-[31620:33032:0313/205506.128:WARNING:chrome_main_delegate.cc(745)] This is Chrome version 128.0.6613.138 (not a warning)
-[31620:2720:0313/205506.160:ERROR:google_update_settings.cc(265)] Failed opening key Software\Chromium to set usagestats; result: 5
-[31620:33032:0313/205506.167:WARNING:account_consistency_mode_manager.cc(77)] Desktop Identity Consistency cannot be enabled as no OAuth client ID and client secret have been configured.
-[31620:33032:0313/205507.694:WARNING:external_registry_loader_win.cc(232)] Error observing HKLM: 5
-[1844:29704:0313/205508.665:WARNING:frame_impl.cc(430)] virtual CefFrameImpl::SendProcessMessage sent to detached frame 5-563969263F8F02E5115AB0E5F0B75ECD will be ignored
-[31620:33032:0313/224135.724:WARNING:pref_notifier_impl.cc(41)] Pref observer for media_router.cast_allow_all_ips found at shutdown.
+[2264:17692:0318/153326.390:WARNING:chrome_main_delegate.cc(745)] This is Chrome version 128.0.6613.138 (not a warning)
+[2264:23240:0318/153326.431:ERROR:google_update_settings.cc(265)] Failed opening key Software\Chromium to set usagestats; result: 5
+[2264:17692:0318/153326.454:WARNING:account_consistency_mode_manager.cc(77)] Desktop Identity Consistency cannot be enabled as no OAuth client ID and client secret have been configured.
+[2264:5260:0318/153328.023:WARNING:leveldb_database.cc(141)] Unable to open C:\Users\a\Documents\GitHub\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata: IO error: C:\Users\a\Documents\GitHub\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata/MANIFEST-000001: Unable to create sequential file (ChromeMethodBFE: 7::NewSequentialFile::1)
+[2264:5260:0318/153328.037:WARNING:leveldb_database.cc(141)] Unable to open C:\Users\a\Documents\GitHub\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata: IO error: C:\Users\a\Documents\GitHub\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata/MANIFEST-000001: Unable to create sequential file (ChromeMethodBFE: 7::NewSequentialFile::1)
+[2264:5260:0318/153328.047:WARNING:leveldb_database.cc(141)] Unable to open C:\Users\a\Documents\GitHub\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata: IO error: C:\Users\a\Documents\GitHub\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata/MANIFEST-000001: Unable to create sequential file (ChromeMethodBFE: 7::NewSequentialFile::1)
+[2264:5260:0318/153328.056:WARNING:leveldb_database.cc(141)] Unable to open C:\Users\a\Documents\GitHub\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata: IO error: C:\Users\a\Documents\GitHub\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata/MANIFEST-000001: Unable to create sequential file (ChromeMethodBFE: 7::NewSequentialFile::1)
+[2264:25036:0318/153328.312:WARNING:value_store_frontend.cc(47)] Reading ahfgeienlihckogmohjhadlkjgocpleb.alarms from  failed: IO error: .../MANIFEST-000001: Unable to create sequential file (ChromeMethodBFE: 7::NewSequentialFile::1)
+[2264:25036:0318/153328.323:WARNING:value_store_frontend.cc(47)] Reading mhjfbmdgcfjbbpaeojofohoefgiehjai.alarms from  failed: IO error: .../MANIFEST-000001: Unable to create sequential file (ChromeMethodBFE: 7::NewSequentialFile::1)
+[26136:24612:0318/153328.747:WARNING:frame_impl.cc(430)] virtual CefFrameImpl::SendProcessMessage sent to detached frame 5-BF49A2A900F4CE79FFE48B611274F8B6 will be ignored
+[2264:17692:0318/202436.408:WARNING:pref_notifier_impl.cc(41)] Pref observer for media_router.cast_allow_all_ips found at shutdown.
