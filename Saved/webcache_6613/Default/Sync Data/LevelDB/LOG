@@ -1,3 +1,2 @@
-2026/03/18-17:56:52.490 244 Reusing MANIFEST C:\project\SeaProject\Saved\webcache_6613\Default\Sync Data\LevelDB/MANIFEST-000001
-2026/03/18-17:56:52.505 244 Recovering log #3
-2026/03/18-17:56:52.506 244 Reusing old log C:\project\SeaProject\Saved\webcache_6613\Default\Sync Data\LevelDB/000003.log 
+2026/03/19-12:04:35.907 76d8 Creating DB C:\project\SeaProject\Saved\webcache_6613\Default\Sync Data\LevelDB since it was missing.
+2026/03/19-12:04:35.938 76d8 Reusing MANIFEST C:\project\SeaProject\Saved\webcache_6613\Default\Sync Data\LevelDB/MANIFEST-000001

@@ -1,3 +1,2 @@
-2026/03/18-17:56:57.625 244 Reusing MANIFEST C:\project\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata/MANIFEST-000001
-2026/03/18-17:56:57.625 244 Recovering log #3
-2026/03/18-17:56:57.626 244 Reusing old log C:\project\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata/000003.log 
+2026/03/19-12:04:40.761 76d8 Creating DB C:\project\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata since it was missing.
+2026/03/19-12:04:40.768 76d8 Reusing MANIFEST C:\project\SeaProject\Saved\webcache_6613\Default\shared_proto_db\metadata/MANIFEST-000001
