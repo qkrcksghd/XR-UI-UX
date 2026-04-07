@@ -47,13 +47,6 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "XR | Components")
 	UMotionControllerComponent* RightHandController;
 
-	// 그랩 범위를 시각화하거나 로직에 사용할 충돌 구체
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "XR | Components")
-	USphereComponent* LeftGrabSphere;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "XR | Components")
-	USphereComponent* RightGrabSphere;
-
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "XR | Components")
 	class UFloatingPawnMovement* MovementComp;
 	// ── 향상된 입력 (Enhanced Input) ────────────────────────────────
@@ -63,10 +56,6 @@ public:
 	// 이동 입력 (Vector2D: 조이스틱 X, Y)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "XR | Input")
 	UInputAction* MoveAction;
-
-	// 그랩 입력 (Digital: 버튼 누름/뗌)
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "XR | Input")
-	UInputAction* GrabLeftAction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "XR | Input")
 	UInputAction* GrabRightAction;
@@ -78,23 +67,4 @@ public:
 private:
 	// ── 입력 처리 함수 (Binding) ──────────────────────────────────
 	void Input_Move(const FInputActionValue& Value);
-
-	// 왼쪽 그랩
-	void Input_GrabLeft_Started();
-	void Input_GrabLeft_Completed();
-
-	// 오른쪽 그랩
-	void Input_GrabRight_Started();
-	void Input_GrabRight_Completed();
-
-	// ── 그랩 로직 함수 ──────────────────────────────────────────────
-	void AttemptGrab(USphereComponent* GrabSphere, UMotionControllerComponent* TargetController);
-	void ReleaseGrab(UMotionControllerComponent* TargetController);
-
-	// 현재 잡고 있는 액터를 저장할 변수 (간단한 구현용)
-	UPROPERTY()
-	AActor* HeldActorLeft;
-
-	UPROPERTY()
-	AActor* HeldActorRight;
 };
