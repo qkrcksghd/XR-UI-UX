@@ -31,20 +31,10 @@ AXRPawn::AXRPawn()
 	LeftHandController->SetupAttachment(VRRoot);
 	LeftHandController->SetTrackingMotionSource(FXRMotionControllerBase::LeftHandSourceId);
 
-	LeftGrabSphere = CreateDefaultSubobject<USphereComponent>(TEXT("LeftGrabSphere"));
-	LeftGrabSphere->SetupAttachment(LeftHandController);
-	LeftGrabSphere->SetSphereRadius(10.0f); // 그랩 반경 설정
-	LeftGrabSphere->SetCollisionProfileName(TEXT("Trigger")); // 물리 충돌 대신 트리거로 사용
-
 	// 3. 모션 컨트롤러 설정 (오른손)
 	RightHandController = CreateDefaultSubobject<UMotionControllerComponent>(TEXT("RightHandController"));
 	RightHandController->SetupAttachment(VRRoot);
 	RightHandController->SetTrackingMotionSource(FXRMotionControllerBase::RightHandSourceId);
-
-	RightGrabSphere = CreateDefaultSubobject<USphereComponent>(TEXT("RightGrabSphere"));
-	RightGrabSphere->SetupAttachment(RightHandController);
-	RightGrabSphere->SetSphereRadius(10.0f);
-	RightGrabSphere->SetCollisionProfileName(TEXT("Trigger"));
 }
 
 void AXRPawn::BeginPlay()
@@ -81,20 +71,6 @@ void AXRPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 		{
 			EnhancedInputComp->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AXRPawn::Input_Move);
 		}
-
-		// 그랩 (왼손) - 버튼 누름(Started), 뗌(Completed)
-		if (GrabLeftAction)
-		{
-			EnhancedInputComp->BindAction(GrabLeftAction, ETriggerEvent::Started, this, &AXRPawn::Input_GrabLeft_Started);
-			EnhancedInputComp->BindAction(GrabLeftAction, ETriggerEvent::Completed, this, &AXRPawn::Input_GrabLeft_Completed);
-		}
-
-		// 그랩 (오른손)
-		if (GrabRightAction)
-		{
-			EnhancedInputComp->BindAction(GrabRightAction, ETriggerEvent::Started, this, &AXRPawn::Input_GrabRight_Started);
-			EnhancedInputComp->BindAction(GrabRightAction, ETriggerEvent::Completed, this, &AXRPawn::Input_GrabRight_Completed);
-		}
 	}
 }
 
@@ -118,107 +94,5 @@ void AXRPawn::Input_Move(const FInputActionValue& Value)
 		// 좌우 (X축)
 		FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 		AddMovementInput(RightDirection, MoveVector.X * MoveSpeed * GetWorld()->GetDeltaSeconds());
-	}
-}
-
-// 왼쪽 그랩 처리
-void AXRPawn::Input_GrabLeft_Started() { AttemptGrab(LeftGrabSphere, LeftHandController); }
-void AXRPawn::Input_GrabLeft_Completed() { ReleaseGrab(LeftHandController); }
-
-// 오른쪽 그랩 처리
-void AXRPawn::Input_GrabRight_Started() { AttemptGrab(RightGrabSphere, RightHandController); }
-void AXRPawn::Input_GrabRight_Completed() { ReleaseGrab(RightHandController); }
-
-
-// ── 그랩 로직 구현 (간단한 버전) ────────────────────────────────────────────
-
-void AXRPawn::AttemptGrab(USphereComponent* GrabSphere, UMotionControllerComponent* TargetController)
-{
-	// 이미 잡고 있다면 리턴
-	if ((TargetController == LeftHandController && HeldActorLeft) || (TargetController == RightHandController && HeldActorRight))
-	{
-		return;
-	}
-
-	// 1. GrabSphere 영역 내에 있는 액터 찾기 (Sphere Overlap Actor)
-	TArray<AActor*> OverlappingActors;
-	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_PhysicsBody)); // 물리 액터만 감지
-
-	// Kismet 라이브러리를 사용하여 간단하게 Overlap 체크
-	UKismetSystemLibrary::SphereOverlapActors(
-		GrabSphere,
-		GrabSphere->GetComponentLocation(),
-		GrabSphere->GetScaledSphereRadius(),
-		ObjectTypes,
-		AActor::StaticClass(), // 모든 액터 클래스
-		TArray<AActor*>(), // 무시할 액터 없음
-		OverlappingActors
-	);
-
-	// 2. 가장 가까운 액터 찾기 및 Attach
-	AActor* ClosestActor = nullptr;
-	float MinDistance = FLT_MAX;
-
-	for (AActor* Actor : OverlappingActors)
-	{
-		// 자기 자신(Pawn)은 무시
-		if (Actor == this) continue;
-
-		// 액터의 스태틱 메쉬가 있는지 확인하고 물리 시뮬레이션 중인지 체크 (잡으려면 물리가 켜져 있어야 함)
-		UStaticMeshComponent* MeshComp = Cast<UStaticMeshComponent>(Actor->GetComponentByClass(UStaticMeshComponent::StaticClass()));
-		if (MeshComp && MeshComp->IsSimulatingPhysics())
-		{
-			float Distance = FVector::Dist(GrabSphere->GetComponentLocation(), Actor->GetActorLocation());
-			if (Distance < MinDistance)
-			{
-				MinDistance = Distance;
-				ClosestActor = Actor;
-			}
-		}
-	}
-
-	if (ClosestActor)
-	{
-		// 3. 액터 Attach (잡기)
-		UE_LOG(LogTemp, Warning, TEXT("Grabbed Actor: %s"), *ClosestActor->GetName());
-
-		// 스태틱 메쉬의 물리를 끄고 컨트롤러에 Attach
-		UStaticMeshComponent* MeshComp = Cast<UStaticMeshComponent>(ClosestActor->GetComponentByClass(UStaticMeshComponent::StaticClass()));
-		if (MeshComp)
-		{
-			MeshComp->SetSimulatePhysics(false); // 잡았을 때는 물리를 꺼야 함
-		}
-
-		// 컨트롤러 컴포넌트에 액터를 Attach (위치, 회전 유지)
-		ClosestActor->AttachToComponent(TargetController, FAttachmentTransformRules::KeepWorldTransform);
-
-		// 잡고 있는 액터 변수에 저장
-		if (TargetController == LeftHandController) { HeldActorLeft = ClosestActor; }
-		else { HeldActorRight = ClosestActor; }
-	}
-}
-
-void AXRPawn::ReleaseGrab(UMotionControllerComponent* TargetController)
-{
-	AActor* ActorToRelease = (TargetController == LeftHandController) ? HeldActorLeft : HeldActorRight;
-
-	if (ActorToRelease)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Released Actor: %s"), *ActorToRelease->GetName());
-
-		// 1. Detach (떼어내기)
-		ActorToRelease->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-
-		// 2. 물리 다시 켜기
-		UStaticMeshComponent* MeshComp = Cast<UStaticMeshComponent>(ActorToRelease->GetComponentByClass(UStaticMeshComponent::StaticClass()));
-		if (MeshComp)
-		{
-			MeshComp->SetSimulatePhysics(true);
-		}
-
-		// 3. 변수 초기화
-		if (TargetController == LeftHandController) { HeldActorLeft = nullptr; }
-		else { HeldActorRight = nullptr; }
 	}
 }
