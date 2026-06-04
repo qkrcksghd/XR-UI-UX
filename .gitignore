@@ -1,3 +1,6 @@
+# 에셋(Content)은 용량이 커서 git 대신 드라이브로 관리함
+Content/
+
 Binaries/
 DerivedDataCache/
 Intermediate/
