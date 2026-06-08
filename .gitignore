@@ -1,6 +1,6 @@
-# 에셋(Content)은 용량이 커서 git 대신 드라이브로 관리함
-Content/
-
+# ─────────────────────────────────────────────────────────────
+#  Unreal Engine 자동 생성 폴더/파일 (빌드하면 다시 생김 — git 제외)
+# ─────────────────────────────────────────────────────────────
 Binaries/
 DerivedDataCache/
 Intermediate/
@@ -16,3 +16,20 @@ Saved/
 *.log
 .DS_Store
 Thumbs.db
+
+# ─────────────────────────────────────────────────────────────
+#  대용량 아트 에셋 — GitHub 용량 초과(파일당 100MB / 저장소 1GB 권장)로 제외.
+#  ★ 이 폴더들은 git에 안 올라갑니다. 별도 드라이브로 백업/공유하세요.
+#    (자세한 경로·복원 방법은 "대용량_드라이브관리_안내.txt" 참고)
+# ─────────────────────────────────────────────────────────────
+/Content/SY/Map/
+/Content/SY/Mesh/
+/Content/DeepWaterStation/
+/Content/Fab/
+/Content/MWLandscapeAutoMaterial/
+/Content/ARTEMUS_DesertCliffs/
+/Content/RP_Vol_01/
+/Content/_GENERATED/
+/Content/StaticMesh/
+
+# (필요시) 개별 대용량 파일을 더 빼려면 아래에 경로 추가

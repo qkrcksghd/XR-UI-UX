@@ -4,113 +4,51 @@
 #include "Camera/CameraComponent.h"
 #include "GameFramework/FloatingPawnMovement.h"
 
-AMyPlayerPawn::AMyPlayerPawn()
+AMyPlayerPawn::AMyPlayerPawn() //생성자
 {
-    PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick = true; // 매 프레임마다 Tick() 함수를 호출하도록 설정 (필요에 따라 true로 설정)
 
-    // 1. 루트 컴포넌트 설정
-    RootScene = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
-    RootComponent = RootScene;
+	RootScene = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));    // 루트 컴포넌트 생성
+	RootComponent = RootScene; //  루트 컴포넌트를 RootScene으로 설정
 
-    // 2. 카메라 설정
-    PlayerCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("PlayerCamera"));
-    PlayerCamera->SetupAttachment(RootComponent);
-    PlayerCamera->bUsePawnControlRotation = true;
+	PlayerCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("PlayerCamera")); // 카메라 컴포넌트 생성
+	PlayerCamera->SetupAttachment(RootComponent);// 카메라를 루트 컴포넌트에 부착
 
-    // 3. 무브먼트 컴포넌트 설정
+    // 1인칭 필수 설정: 카메라가 플레이어 컨트롤러의 회전값을 그대로 따르게 합니다.
+	PlayerCamera->bUsePawnControlRotation = true;// 카메라가 폰의 회전값을 따르도록 설정
+
     MovementComponent = CreateDefaultSubobject<UFloatingPawnMovement>(TEXT("MovementComponent"));
 
-    // 초기 물리 설정 (가속도/감속도를 높여야 부스터 체감이 좋습니다)
-    MovementComponent->MaxSpeed = NormalSpeed;
-    MovementComponent->Acceleration = 6000.f;
-    MovementComponent->Deceleration = 6000.f;
-
-    // 폰 회전 설정
-    bUseControllerRotationYaw = true;
-    bUseControllerRotationPitch = true;
+    
+	bUseControllerRotationYaw = true; //마우스로 좌우로 돌릴 때 폰 몸체도 같이 회전하게 하려면 true (일반적인 PC FPS 방식)
+	bUseControllerRotationPitch = true;// 마우스로 좌우로 돌릴 때 폰 몸체도 같이 회전하게 하려면 true (일반적인 PC FPS 방식)
 }
 
-void AMyPlayerPawn::Tick(float DeltaTime)
+void AMyPlayerPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) // 입력 바인딩 설정
 {
-    Super::Tick(DeltaTime);
-
-    // 부스터(대시) 게이지 처리 로직
-    if (bIsDashing && CurrentBooster > 0.0f)
-    {
-        // 대시 중: 게이지 소모
-        CurrentBooster -= BoosterDrainSpeed * DeltaTime;
-
-        if (CurrentBooster <= 0.0f)
-        {
-            CurrentBooster = 0.0f;
-            StopDash(); // 게이지 다 쓰면 강제 중지
-        }
-    }
-    else if (!bIsDashing && CurrentBooster < MaxBooster)
-    {
-        // 대시 안 함: 게이지 회복
-        CurrentBooster += BoosterRegenSpeed * DeltaTime;
-        CurrentBooster = FMath::Clamp(CurrentBooster, 0.0f, MaxBooster);
-    }
-}
-
-void AMyPlayerPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
-{
-    Super::SetupPlayerInputComponent(PlayerInputComponent);
+	Super::SetupPlayerInputComponent(PlayerInputComponent); // 부모 클래스의 입력 설정도 호출
 
     // 이동 바인딩
-    PlayerInputComponent->BindAxis("MoveForward", this, &AMyPlayerPawn::MoveForward);
-    PlayerInputComponent->BindAxis("MoveRight", this, &AMyPlayerPawn::MoveRight);
+    PlayerInputComponent->BindAxis("MoveForward", this, &AMyPlayerPawn::MoveForward); //앞뒤
+    PlayerInputComponent->BindAxis("MoveRight", this, &AMyPlayerPawn::MoveRight); //좌우
 
-    // 회전 바인딩
-    PlayerInputComponent->BindAxis("LookUp", this, &AMyPlayerPawn::LookUp);
-    PlayerInputComponent->BindAxis("Turn", this, &AMyPlayerPawn::Turn);
-
-    // 대시 액션 바인딩
-    PlayerInputComponent->BindAction("Dash", IE_Pressed, this, &AMyPlayerPawn::StartDash);
-    PlayerInputComponent->BindAction("Dash", IE_Released, this, &AMyPlayerPawn::StopDash);
+    // 회전 바인딩 추가
+	PlayerInputComponent->BindAxis("LookUp", this, &AMyPlayerPawn::LookUp);//마우스 Y축 (위아래)
+	PlayerInputComponent->BindAxis("Turn", this, &AMyPlayerPawn::Turn);//마우스 X축 (좌우)
 }
 
-void AMyPlayerPawn::StartDash()
-{
-    // 게이지가 10% 이상일 때만 대시 시작 가능
-    if (CurrentBooster > 10.0f)
-    {
-        bIsDashing = true;
-        if (MovementComponent)
-        {
-            MovementComponent->MaxSpeed = DashSpeed;
-            UE_LOG(LogTemp, Warning, TEXT("Booster Active! Speed: %f"), DashSpeed);
-        }
-    }
+void AMyPlayerPawn::MoveForward(float Value) {
+	if (Value != 0.f) AddMovementInput(GetActorForwardVector(), Value);// 폰의 앞 방향으로 입력값만큼 이동하도록 함
 }
 
-void AMyPlayerPawn::StopDash()
-{
-    bIsDashing = false;
-    if (MovementComponent)
-    {
-        MovementComponent->MaxSpeed = NormalSpeed;
-        UE_LOG(LogTemp, Warning, TEXT("Booster Off! Speed: %f"), NormalSpeed);
-    }
+void AMyPlayerPawn::MoveRight(float Value) {
+	if (Value != 0.f) AddMovementInput(GetActorRightVector(), Value);// 폰의 오른쪽 방향으로 입력값만큼 이동하도록 함
 }
 
-void AMyPlayerPawn::MoveForward(float Value)
-{
-    if (Value != 0.f) AddMovementInput(GetActorForwardVector(), Value);
+void AMyPlayerPawn::LookUp(float Value) {
+	AddControllerPitchInput(Value); // 마우스 Y축 입력값을 컨트롤러의 Pitch에 더하여 위아래 회전 구현
 }
 
-void AMyPlayerPawn::MoveRight(float Value)
-{
-    if (Value != 0.f) AddMovementInput(GetActorRightVector(), Value);
-}
-
-void AMyPlayerPawn::LookUp(float Value)
-{
-    AddControllerPitchInput(Value);
-}
-
-void AMyPlayerPawn::Turn(float Value)
-{
-    AddControllerYawInput(Value);
+void AMyPlayerPawn::Turn(float Value) {
+	AddControllerYawInput(Value); // 마우스 X축 입력값을 컨트롤러의 Yaw에 더하여 좌우 회전 구현
 }

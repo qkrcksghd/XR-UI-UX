@@ -16,21 +16,21 @@ public class SeaProject : ModuleRules
 			"InputCore",
 			"EnhancedInput",
 			"HeadMountedDisplay",
-			"XRBase"
+			"XRBase",
+			"UMG"           // 시작 화면: World 위젯 컴포넌트 + 레이저(WidgetInteraction)
 		});
 
         PrivateDependencyModuleNames.AddRange(new string[] {  });
 
-		// 모듈 루트를 인클루드 경로에 추가 → "Scan/...", "Player/..." 처럼
-		// 하위 폴더를 경로로 #include 할 수 있게 함
-		PrivateIncludePaths.Add(ModuleDirectory);
+        // 모듈 루트를 인클루드 경로에 추가 → "Scan/...", "Player/..." 처럼
+        // 하위 폴더를 경로로 #include 할 수 있게 함
+        PrivateIncludePaths.Add(ModuleDirectory);
+        // Uncomment if you are using Slate UI
+        // PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
 
-		// Uncomment if you are using Slate UI
-		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
-		
-		// Uncomment if you are using online features
-		// PrivateDependencyModuleNames.Add("OnlineSubsystem");
+        // Uncomment if you are using online features
+        // PrivateDependencyModuleNames.Add("OnlineSubsystem");
 
-		// To include OnlineSubsystemSteam, add it to the plugins section in your uproject file with the Enabled attribute set to true
-	}
+        // To include OnlineSubsystemSteam, add it to the plugins section in your uproject file with the Enabled attribute set to true
+    }
 }
