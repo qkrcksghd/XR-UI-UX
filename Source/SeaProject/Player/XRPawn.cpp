@@ -15,6 +15,10 @@
 #include "Components/SpotLightComponent.h"
 #include "Components/AudioComponent.h"
 #include "Components/TextRenderComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/MeshComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "Sound/SoundBase.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h" // GEngine->AddOnScreenDebugMessage (디버그용)
@@ -24,7 +28,13 @@
 #include "Encyclopedia/EncyclopediaSubsystem.h"
 #include "Encyclopedia/EncyclopediaLibrary.h"
 #include "Encyclopedia/FishSwimComponent.h"
+#include "Interaction/Door.h"
+#include "Interaction/Chest.h"
 #include "Audio/BackgroundMusic.h"
+#include "NiagaraFunctionLibrary.h" // 보물상자 완료 VFX 스폰
+#include "NiagaraSystem.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/PlayerCameraManager.h" // 엔딩 화면 페이드
 #include "TimerManager.h"
 
 AXRPawn::AXRPawn()
@@ -93,6 +103,43 @@ AXRPawn::AXRPawn()
 	DepthText->SetWorldSize(8.0f);                 // 글자 크기(작게 시작 — BP 에서 조정)
 	DepthText->SetTextRenderColor(FColor::White);
 	DepthText->SetText(FText::FromString(TEXT("Depth 0m")));
+
+	// 7. 도감 텍스트(손목 시계) — 왼손에 부착. 홀로그램 열리면 DepthText 대신 이 셋이 켜진다.
+	//    한 루트 밑에 묶어서 BP 에서 위치를 한 번에 맞추게 한다. 기본은 숨김(아래에서 일괄 처리).
+	EncyclopediaTextRoot = CreateDefaultSubobject<USceneComponent>(TEXT("EncyclopediaTextRoot"));
+	EncyclopediaTextRoot->SetupAttachment(LeftHandController);
+
+	auto MakeEncyText = [this](const TCHAR* CompName, float LocalZ, FColor Color, float Size)
+	{
+		UTextRenderComponent* T = CreateDefaultSubobject<UTextRenderComponent>(CompName);
+		T->SetupAttachment(EncyclopediaTextRoot);
+		T->SetRelativeLocation(FVector(0.0f, 0.0f, LocalZ)); // 위→아래로 쌓기 (BP 에서 조정 가능)
+		T->SetHorizontalAlignment(EHTA_Center);
+		T->SetVerticalAlignment(EVRTA_TextCenter);
+		T->SetWorldSize(Size);
+		T->SetTextRenderColor(Color);
+		return T;
+	};
+	// 위에서 아래로: 이름(큼) / 스테이지 / 깊이
+	EncyNameText  = MakeEncyText(TEXT("EncyNameText"),   6.0f, FColor::White,          7.0f);
+	EncyStageText = MakeEncyText(TEXT("EncyStageText"),  0.0f, FColor(180, 220, 255),  5.0f);
+	EncyDepthText = MakeEncyText(TEXT("EncyDepthText"), -5.0f, FColor(180, 220, 255),  5.0f);
+
+	// 시작은 닫힘 상태 → 도감 텍스트 묶음을 통째로 숨긴다(자식까지 전파). DepthText 는 기본 표시.
+	EncyclopediaTextRoot->SetVisibility(false, /*bPropagateToChildren=*/true);
+
+	// 8. 보물상자 수집 카운트("1/4") — 카메라 앞에 잠깐 뜨는 3D 텍스트. 수집할 때만 C++ 가 켜고 끈다.
+	//    카메라에 붙어 시야를 따라다닌다. 위치/각도는 BP 에서 이 컴포넌트를 옮겨 조정.
+	ChestCountText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("ChestCountText"));
+	ChestCountText->SetupAttachment(Camera);
+	ChestCountText->SetRelativeLocation(FVector(150.0f, 0.0f, -25.0f)); // 카메라 앞 1.5m, 약간 아래
+	ChestCountText->SetRelativeRotation(FRotator(0.0f, 180.0f, 0.0f));  // 카메라를 향하도록 뒤집기
+	ChestCountText->SetHorizontalAlignment(EHTA_Center);
+	ChestCountText->SetVerticalAlignment(EVRTA_TextCenter);
+	ChestCountText->SetWorldSize(20.0f);
+	ChestCountText->SetTextRenderColor(FColor(255, 215, 0)); // 골드
+	ChestCountText->SetText(FText::FromString(TEXT("0/0")));
+	ChestCountText->SetVisibility(false); // 평소엔 숨김(수집 시에만 표시)
 }
 
 void AXRPawn::BeginPlay()
@@ -136,11 +183,99 @@ void AXRPawn::BeginPlay()
 
 	// 소나(BP_Scanner)는 시작 시 자동 소환하지 않는다.
 	// → Y 버튼(SpawnSonarAction)을 누르면 Input_SpawnSonar() 에서 소환한다.
+
+	// ── 홀로그램(도감 패널) 스폰: 왼손에 부착 후 숨김 ──────────────────────────
+	// C++ 가 전담한다(BP 스폰/토글/메쉬 로직 불필요). 디테일의 HologramClass 에 BP_HologramDisplay 지정.
+	if (HologramClass && GetWorld())
+	{
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.Owner = this;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		HologramInstance = GetWorld()->SpawnActor<AActor>(HologramClass, FTransform::Identity, SpawnParams);
+		if (HologramInstance)
+		{
+			AttachHologramToHand(HologramInstance, /*bRightHand=*/false, HologramLocalTransform);
+			HologramInstance->SetActorHiddenInGame(true); // 시작은 숨김(B 로 열 때 표시)
+			// 홀로그램 안의 물고기 모델(스켈레탈 메쉬) 컴포넌트를 찾아둔다 → 페이지마다 이걸 교체.
+			HologramFishMesh = HologramInstance->FindComponentByClass<USkeletalMeshComponent>();
+		}
+	}
+
+	// 시작 표시 상태 강제: 도감 닫힘 → 손목엔 "현재 수심"(DepthText)만 보이고 도감 텍스트는 숨김.
+	// (생성자에서 준 가시성이 BP 컴포넌트의 Visible 오버라이드에 덮이는 문제를 BeginPlay 에서 바로잡는다)
+	bEncyclopediaOpen = false;
+	if (DepthText)
+	{
+		DepthText->SetVisibility(true);
+	}
+	if (EncyclopediaTextRoot)
+	{
+		EncyclopediaTextRoot->SetVisibility(false, /*bPropagateToChildren=*/true);
+	}
+	if (ChestCountText)
+	{
+		ChestCountText->SetVisibility(false); // 시작은 숨김(수집 시에만 표시)
+	}
+
+	// 도감 텍스트 크기/스케일 정규화: BP 컴포넌트의 Scale/WorldSize 오버라이드로 글자가 제각각 커지는 것 방지.
+	//   - 이름: EncyNameMaxSize (긴 이름은 표시 때 자동 축소)
+	//   - 스테이지/깊이: EncyInfoSize
+	// (앞으로 크기는 이 두 프로퍼티로만 조정 — 컴포넌트 World Size/Scale 은 런타임에 덮어쓴다)
+	auto NormalizeEncyText = [](UTextRenderComponent* T, float Size)
+	{
+		if (T)
+		{
+			T->SetRelativeScale3D(FVector(1.0f));
+			T->SetWorldSize(Size);
+		}
+	};
+	NormalizeEncyText(EncyNameText, EncyNameMaxSize);
+	NormalizeEncyText(EncyStageText, EncyInfoSize);
+	NormalizeEncyText(EncyDepthText, EncyInfoSize);
 }
 
 void AXRPawn::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	// 엔딩 연출 중이면: 수면까지 이즈인아웃으로 떠오르고, 도착하면 화면 페이드 아웃.
+	if (bEndingActive && !bEndingReachedSurface)
+	{
+		EndingElapsed += DeltaTime;
+		const float Dur = FMath::Max(0.1f, AscentDuration);
+		const float Alpha = FMath::Clamp(EndingElapsed / Dur, 0.0f, 1.0f);
+		const float Smooth = FMath::SmoothStep(0.0f, 1.0f, Alpha); // 느리게 시작/끝(시네마틱)
+
+		FVector Loc = GetActorLocation();
+		Loc.Z = FMath::Lerp(EndingStartZ, WaterSurfaceZ, Smooth);
+		SetActorLocation(Loc, /*bSweep=*/false);
+
+		if (Alpha >= 1.0f)
+		{
+			bEndingReachedSurface = true;
+
+			// 화면 페이드 아웃(수면 도착). bHoldWhenFinished=true → 페이드된 채 유지.
+			if (APlayerController* PC = Cast<APlayerController>(GetController()))
+			{
+				if (PC->PlayerCameraManager)
+				{
+					PC->PlayerCameraManager->StartCameraFade(
+						0.0f, 1.0f, FMath::Max(0.1f, EndingFadeDuration),
+						EndingFadeColor, /*bFadeAudio=*/true, /*bHoldWhenFinished=*/true);
+				}
+			}
+			OnReachedSurface(); // BP: 크레딧 등 추가 연출(선택)
+
+			// 페이드가 끝난 뒤(EndingFadeDuration) 추가로 EndingHoldBeforeMenu 만큼 더 기다렸다가 메인메뉴로.
+			// → 페이드된 화면을 잠깐 보여주고 전환(너무 빨리 안 넘어가게).
+			if (UWorld* World = GetWorld())
+			{
+				const float MenuDelay = FMath::Max(0.1f, EndingFadeDuration) + FMath::Max(0.0f, EndingHoldBeforeMenu);
+				World->GetTimerManager().SetTimer(
+					EndingMenuTimer, this, &AXRPawn::ReturnToMainMenu, MenuDelay, false);
+			}
+		}
+	}
 
 	// 손전등 스캔(물고기 수집) 갱신
 	UpdateFlashlightScan(DeltaTime);
@@ -154,6 +289,20 @@ void AXRPawn::Tick(float DeltaTime)
 			LastShownDepthMeters = Meters;
 			DepthText->SetText(GetPlayerDepthText());
 		}
+	}
+
+	// 도감이 열려 있으면 홀로그램 물고기 모델을 천천히 회전(전 방향 보이게).
+	if (bEncyclopediaOpen && HologramFishMesh && !HologramSpinRate.IsNearlyZero())
+	{
+		HologramFishMesh->AddLocalRotation(HologramSpinRate * DeltaTime);
+	}
+
+	// 수심 보정용 디버그 — 켜면 화면에 폰 Z / 수면 Z / 수심 표시. WaterSurfaceZ 맞출 때만 켠다.
+	if (bShowDepthDebug && GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(7654, 0.0f, FColor::Cyan,
+			FString::Printf(TEXT("[Depth] PawnZ=%.0f  SurfaceZ=%.0f  =>  %.1f m"),
+				GetActorLocation().Z, WaterSurfaceZ, GetPlayerDepthMeters()));
 	}
 }
 
@@ -176,9 +325,14 @@ AActor* AXRPawn::GetFlashlightScanTarget()
 	const FVector Start = Flashlight->GetComponentLocation();
 	const FVector Forward = Flashlight->GetForwardVector();
 
-	// 월드의 모든 "Fish" 태그 액터 수집
+	// 월드의 모든 "Fish" 태그 액터 수집 + 보물상자("Chest" 태그)도 같은 스캔 대상에 포함.
 	TArray<AActor*> Fishes;
 	UGameplayStatics::GetAllActorsWithTag(GetWorld(), FName("Fish"), Fishes);
+	{
+		TArray<AActor*> Chests;
+		UGameplayStatics::GetAllActorsWithTag(GetWorld(), FName("Chest"), Chests);
+		Fishes.Append(Chests);
+	}
 
 	AActor* ClosestFish = nullptr;
 	float ClosestDist = TNumericLimits<float>::Max();
@@ -186,6 +340,12 @@ AActor* AXRPawn::GetFlashlightScanTarget()
 	for (AActor* Fish : Fishes)
 	{
 		if (!Fish || Fish == this)
+		{
+			continue;
+		}
+
+		// 이미 수집한 상자는 다시 락온되지 않게 제외(중복 카운트/VFX 방지).
+		if (Fish->ActorHasTag(FName("Chest")) && IsChestCollected(Fish))
 		{
 			continue;
 		}
@@ -198,9 +358,12 @@ AActor* AXRPawn::GetFlashlightScanTarget()
 
 		const FVector ToFish = Origin - Start;
 		const float Dist = ToFish.Size();
-		if (Dist <= KINDA_SMALL_NUMBER || Dist > ScanRange)
+		// 큰 물고기도 표면 가까이 가면 잡히게: 중심이 아니라 "바운드 표면까지" 거리로 사거리 판정.
+		// (lure 처럼 거대한 종은 중심이 멀어서 코앞에서도 사거리 밖이던 문제 해결)
+		const float SurfaceDist = FMath::Max(0.0f, Dist - Radius);
+		if (Dist <= KINDA_SMALL_NUMBER || SurfaceDist > ScanRange)
 		{
-			continue; // 너무 가깝거나(겹침) 사거리 밖
+			continue; // 표면까지도 사거리 밖
 		}
 
 		const FVector ToFishDir = ToFish / Dist;
@@ -270,6 +433,27 @@ void AXRPawn::SetFishFleeing(AActor* Fish, bool bFlee)
 	}
 }
 
+// 스캔 하이라이트: 물고기의 모든 메쉬 컴포넌트에 오버레이 머티리얼을 입히거나(ON) 벗긴다(OFF).
+// 오버레이는 메쉬를 그대로 덮어 렌더되므로 "겉을 감싸는" 스캔 이펙트로 보인다.
+void AXRPawn::SetScanHighlight(AActor* Fish, bool bOn)
+{
+	if (!Fish || (bOn && !ScanOverlayMaterial))
+	{
+		return; // 끌 때는 머티리얼 없어도 진행(벗기기), 켤 때 머티리얼 없으면 아무것도 안 함
+	}
+
+	UMaterialInterface* Overlay = bOn ? ScanOverlayMaterial : nullptr;
+	TArray<UMeshComponent*> Meshes;
+	Fish->GetComponents<UMeshComponent>(Meshes);
+	for (UMeshComponent* Mesh : Meshes)
+	{
+		if (Mesh)
+		{
+			Mesh->SetOverlayMaterial(Overlay);
+		}
+	}
+}
+
 // 레벨의 배경음악(ABackgroundMusic)을 찾아 일시정지/재개한다.
 void AXRPawn::SetBackgroundMusicPaused(bool bPaused)
 {
@@ -334,8 +518,9 @@ void AXRPawn::UpdateFlashlightScan(float DeltaTime)
 	{
 		if (CurrentScanTarget)
 		{
-			SetFishFleeing(CurrentScanTarget, false); // 도망 멈춤
-			SetScanLoopSound(false);                  // 루프 사운드 정지
+			SetScanHighlight(CurrentScanTarget, false); // 하이라이트 벗기기
+			SetFishFleeing(CurrentScanTarget, false);   // 도망 멈춤
+			SetScanLoopSound(false);                    // 루프 사운드 정지
 			CurrentScanTarget = nullptr;
 			ScanProgress = 0.0f;
 			ScanPercent = 0.0f;
@@ -359,10 +544,23 @@ void AXRPawn::UpdateFlashlightScan(float DeltaTime)
 		ScanProgress = 0.0f;
 		ScanPercent = 0.0f;
 
-		// 이 물고기의 스캔 시간을 데이터테이블에서 읽어 적용(물고기마다 다르게).
-		// 테이블/행/ScanTime 이 없으면 기본값 ScanDuration 으로 폴백.
+		const bool bChest = Acquired->ActorHasTag(FName("Chest"));
+
+		// 스캔 시간 결정.
+		//  - 상자: ChestScanDuration(>0) 사용, 없으면 기본 ScanDuration.
+		//  - 물고기: 데이터테이블의 그 행 ScanTime, 없으면 기본 ScanDuration.
 		CurrentScanDuration = ScanDuration;
-		if (EncyclopediaTable)
+		if (bChest)
+		{
+			// 상자별 ScanTime(AChest)이 있으면 그걸, 없으면 폰의 ChestScanDuration 폴백.
+			float ChestTime = ChestScanDuration;
+			if (AChest* Chest = Cast<AChest>(Acquired))
+			{
+				if (Chest->ScanTime > 0.0f) { ChestTime = Chest->ScanTime; }
+			}
+			if (ChestTime > 0.0f) { CurrentScanDuration = ChestTime; }
+		}
+		else if (EncyclopediaTable)
 		{
 			FName Row = UEncyclopediaLibrary::GetActorFishRowName(Acquired);
 			Row = UEncyclopediaLibrary::ResolveEncyclopediaRowName(EncyclopediaTable, Row, Acquired);
@@ -373,7 +571,12 @@ void AXRPawn::UpdateFlashlightScan(float DeltaTime)
 			}
 		}
 
-		// 스캔 새로 시작 → 루프 사운드 재생 시작 + BP 이벤트(추가 연출용).
+		// 스캔 새로 시작 → 루프 사운드 + BP 이벤트(추가 연출용).
+		// 상자는 "완료 VFX만" 쓰기로 했으므로 스캔 중 하이라이트는 입히지 않는다(물고기만).
+		if (!bChest)
+		{
+			SetScanHighlight(Acquired, true);
+		}
 		SetScanLoopSound(true);
 		OnScanStarted(Acquired, CurrentScanDuration);
 	}
@@ -389,8 +592,30 @@ void AXRPawn::UpdateFlashlightScan(float DeltaTime)
 		return;
 	}
 
-	// 락온된 대상으로 계속 진행(콘/사거리를 벗어나도 트리거 유지하는 한 유지).
+	// 락온된 대상으로 계속 진행(손전등 콘은 벗어나도 트리거 유지하는 한 유지).
 	AActor* Target = CurrentScanTarget;
+
+	// "소나 범위" 이탈 취소: 락온된 물고기가 손전등에서 ScanCancelRange 이상 멀어지면 스캔 중지.
+	// (도망쳐 범위를 벗어난 물고기는 놓친다 → 다시 잡으려면 가까운 물고기를 새로 비추면 됨)
+	if (ScanCancelRange > 0.0f)
+	{
+		const FVector ScanOrigin = Flashlight ? Flashlight->GetComponentLocation() : GetActorLocation();
+		// 큰 물고기는 "표면까지" 거리로 판정(중심 기준이면 거대 종이 코앞에서도 취소됨).
+		FVector TOrigin, TExtent;
+		Target->GetActorBounds(false, TOrigin, TExtent);
+		const float TargetSurfaceDist = FMath::Max(0.0f, FVector::Dist(ScanOrigin, TOrigin) - TExtent.Size());
+		if (TargetSurfaceDist > ScanCancelRange)
+		{
+			SetScanHighlight(Target, false); // 하이라이트 벗기기
+			SetFishFleeing(Target, false);   // 도망 멈춤
+			SetScanLoopSound(false);         // 루프 사운드 정지
+			CurrentScanTarget = nullptr;
+			ScanProgress = 0.0f;
+			ScanPercent = 0.0f;
+			OnScanReset();                   // 진행중 UI 숨김
+			return;
+		}
+	}
 
 	// 스캔당하는 동안 물고기는 플레이어 반대쪽으로 빠르게 도망(매 틱 위협 위치 갱신).
 	SetFishFleeing(Target, true);
@@ -413,45 +638,241 @@ void AXRPawn::UpdateFlashlightScan(float DeltaTime)
 			FString::Printf(TEXT("스캔중... %d%%"), FMath::RoundToInt(Percent * 100.0f)));
 	}
 
-	// 완료 → BP에서 수집 처리, 같은 물고기 중복 방지 위해 리셋
+	// 완료 → 수집 처리, 같은 대상 중복 방지 위해 리셋
 	if (ScanProgress >= CurrentScanDuration)
 	{
 		ScanPercent = 1.0f; // 화면 UI 가 정확히 100% 로 마무리되도록 보장
-		OnFishScanned(Target);
 
-		// 수집 상태를 세션 저장소(GameInstanceSubsystem)에 영구 등록 → 도감을 한 바퀴 돌아도 유지된다.
-		// 테이블이 지정돼 있으면 정확한 행 이름으로, 아니면 물고기 클래스 이름으로 등록(표준키로 변환됨).
-		if (UGameInstance* GI = GetGameInstance())
+		if (Target->ActorHasTag(FName("Chest")))
 		{
-			if (UEncyclopediaSubsystem* Enc = GI->GetSubsystem<UEncyclopediaSubsystem>())
+			// ── 보물상자 수집(히든 퀘스트) ──────────────────────────────
+			// 완료 VFX/사운드는 상자(BP_Chest)가 자기 걸로 재생. AChest 가 아니면(맨 태그 액터)
+			// 폰의 공용 ChestCollectEffect/Sound 로 폴백. 그 뒤 카운트 등록 + BP 팝업.
+			if (AChest* Chest = Cast<AChest>(Target))
 			{
-				// 스폰된 물고기에 각인된 FishRowName 을 먼저 읽어 어떤 종인지 정확히 파악(없으면 NAME_None).
-				FName Row = UEncyclopediaLibrary::GetActorFishRowName(Target);
-				if (EncyclopediaTable)
+				Chest->Collect(); // 상자 자체 이펙트/사운드/추가연출
+			}
+			else
+			{
+				if (ChestCollectEffect)
 				{
-					Row = UEncyclopediaLibrary::ResolveEncyclopediaRowName(EncyclopediaTable, Row, Target);
+					UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+						this, ChestCollectEffect, Target->GetActorLocation(), Target->GetActorRotation());
 				}
-				Enc->MarkCollected(Row.IsNone() ? FName(*Target->GetClass()->GetName()) : Row);
+				if (ChestCollectSound)
+				{
+					UGameplayStatics::PlaySoundAtLocation(this, ChestCollectSound, Target->GetActorLocation());
+				}
+			}
+
+			int32 Collected = 0;
+			if (UGameInstance* GI = GetGameInstance())
+			{
+				if (UEncyclopediaSubsystem* Enc = GI->GetSubsystem<UEncyclopediaSubsystem>())
+				{
+					Enc->MarkChestCollected(Target->GetFName()); // 액터 고유 이름을 키로(중복 방지)
+					Collected = Enc->GetChestCollectedCount();
+				}
+			}
+
+			const int32 Total = GetChestTotal();
+
+			// 카메라 앞에 "1/4" 3D 텍스트 표시(몇 초 뒤 자동 숨김) + BP 이벤트(선택).
+			ShowChestCount(Collected, Total);
+			OnChestCollected(Collected, Total);
+
+			// 상자는 OnFishScanned 를 안 부르므로, 진행도(%) UI 숨김 신호를 여기서 직접 보낸다
+			// (안 그러면 100% 가 화면에 남는다).
+			OnScanReset();
+
+			if (bShowScanDebug && GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow,
+					FString::Printf(TEXT("보물상자 %d/%d"), Collected, Total));
+			}
+		}
+		else
+		{
+			// ── 물고기 수집 ─────────────────────────────────────────────
+			OnFishScanned(Target);
+
+			// 수집 상태를 세션 저장소(GameInstanceSubsystem)에 영구 등록 → 도감을 한 바퀴 돌아도 유지된다.
+			// 테이블이 지정돼 있으면 정확한 행 이름으로, 아니면 물고기 클래스 이름으로 등록(표준키로 변환됨).
+			if (UGameInstance* GI = GetGameInstance())
+			{
+				if (UEncyclopediaSubsystem* Enc = GI->GetSubsystem<UEncyclopediaSubsystem>())
+				{
+					// 스폰된 물고기에 각인된 FishRowName 을 먼저 읽어 어떤 종인지 정확히 파악(없으면 NAME_None).
+					FName Row = UEncyclopediaLibrary::GetActorFishRowName(Target);
+					if (EncyclopediaTable)
+					{
+						Row = UEncyclopediaLibrary::ResolveEncyclopediaRowName(EncyclopediaTable, Row, Target);
+					}
+					Enc->MarkCollected(Row.IsNone() ? FName(*Target->GetClass()->GetName()) : Row);
+				}
+			}
+
+			if (bShowScanDebug && GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, TEXT("수집 완료!"));
+			}
+			if (ScanCompleteSound) // 물고기 완료 사운드 1회(상자는 ChestCollectSound 사용)
+			{
+				UGameplayStatics::PlaySound2D(this, ScanCompleteSound);
+			}
+
+			// 도감 완성 시 엔딩 시네마틱 시작(조작 잠금 + 수면까지 상승 + 페이드 아웃).
+			if (!bEndingActive && IsEncyclopediaComplete())
+			{
+				StartEndingSequence();
 			}
 		}
 
-		if (bShowScanDebug && GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, TEXT("수집 완료!"));
-		}
-		SetFishFleeing(Target, false); // 수집 완료 → 도망 멈춤
-		SetScanLoopSound(false);       // 루프 사운드 정지
-		if (ScanCompleteSound)         // 완료 사운드 1회 재생
-		{
-			UGameplayStatics::PlaySound2D(this, ScanCompleteSound);
-		}
+		SetScanHighlight(Target, false); // 하이라이트 벗기기(상자는 안 입혔어도 안전)
+		SetFishFleeing(Target, false);   // 도망 멈춤(상자는 헤엄 컴포넌트 없어 무시됨)
+		SetScanLoopSound(false);         // 루프 사운드 정지
 		CurrentScanTarget = nullptr;
 		ScanProgress = 0.0f;
+		ScanPercent = 0.0f;              // 진행도 UI 가 100% 로 남지 않도록 초기화
 
-		// 완료 후 스캔 모드 자동 OFF → 같은 물고기를 곧바로 0%부터 다시 잡거나
+		// 완료 후 스캔 모드 자동 OFF → 같은 대상을 곧바로 0%부터 다시 잡거나
 		// 완료가 반복되는 걸 막는다. 다시 스캔하려면 트리거를 뗐다 다시 당기면 된다.
 		bScanActive = false;
 	}
+}
+
+// ── 보물상자(히든 퀘스트) ────────────────────────────────────────────────────
+// 카메라 앞 "1/4" 텍스트를 갱신해 켜고, ChestCountShowSeconds 뒤에 자동으로 숨긴다.
+void AXRPawn::ShowChestCount(int32 Collected, int32 Total)
+{
+	if (!ChestCountText)
+	{
+		return;
+	}
+	ChestCountText->SetText(FText::FromString(FString::Printf(TEXT("%d/%d"), Collected, Total)));
+	ChestCountText->SetVisibility(true);
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			ChestCountHideTimer, this, &AXRPawn::HideChestCount,
+			FMath::Max(0.1f, ChestCountShowSeconds), false);
+	}
+}
+
+void AXRPawn::HideChestCount()
+{
+	if (ChestCountText)
+	{
+		ChestCountText->SetVisibility(false);
+	}
+}
+
+// ── 엔딩 연출 (도감 완성) ─────────────────────────────────────────────────────
+bool AXRPawn::IsEncyclopediaComplete() const
+{
+	// 필요 종 수: 디테일에서 지정(>0)했으면 그 값, 아니면 도감 테이블 전체 행 수.
+	int32 Need = EncyclopediaCompleteCount;
+	if (Need <= 0)
+	{
+		Need = EncyclopediaTable ? EncyclopediaTable->GetRowNames().Num() : 0;
+	}
+	if (Need <= 0)
+	{
+		return false; // 기준을 못 구하면 완성 판정 안 함
+	}
+
+	int32 Have = 0;
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UEncyclopediaSubsystem* Enc = GI->GetSubsystem<UEncyclopediaSubsystem>())
+		{
+			Have = Enc->GetCollectedCount();
+		}
+	}
+	return Have >= Need;
+}
+
+void AXRPawn::StartEndingSequence()
+{
+	if (bEndingActive)
+	{
+		return;
+	}
+	bEndingActive = true;
+	bEndingReachedSurface = false;
+	EndingElapsed = 0.0f;
+	EndingStartZ = GetActorLocation().Z;
+
+	// 조작 전부 잠금. (HMD 헤드 트래킹은 입력 액션이 아니라 카메라를 직접 구동하므로 그대로 유지된다)
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		DisableInput(PC);
+	}
+
+	// 남은 이동 속도 즉시 정지(표류 방지).
+	if (MovementComp)
+	{
+		MovementComp->StopMovementImmediately();
+	}
+
+	// 상승 중 지형/벽에 안 걸리게 캡슐 콜리전 끄기.
+	if (bDisableCollisionDuringAscent && CapsuleRoot)
+	{
+		CapsuleRoot->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+
+	OnEndingStarted(); // BP 추가 연출(음악 등, 선택)
+}
+
+// 페이드 아웃이 끝난 뒤 메인메뉴 레벨로 전환.
+void AXRPawn::ReturnToMainMenu()
+{
+	if (!MainMenuLevelName.IsNone())
+	{
+		UGameplayStatics::OpenLevel(this, MainMenuLevelName);
+	}
+}
+
+// 이 상자 액터가 이미 수집됐는지(서브시스템 조회). 상자 키 = 액터 고유 이름.
+bool AXRPawn::IsChestCollected(AActor* Chest) const
+{
+	if (!Chest)
+	{
+		return false;
+	}
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UEncyclopediaSubsystem* Enc = GI->GetSubsystem<UEncyclopediaSubsystem>())
+		{
+			return Enc->IsChestCollected(Chest->GetFName());
+		}
+	}
+	return false;
+}
+
+// 레벨의 전체 상자 수("Chest" 태그 액터 수) — 1/4 의 분모.
+int32 AXRPawn::GetChestTotal() const
+{
+	TArray<AActor*> Chests;
+	if (GetWorld())
+	{
+		UGameplayStatics::GetAllActorsWithTag(GetWorld(), FName("Chest"), Chests);
+	}
+	return Chests.Num();
+}
+
+// 지금까지 수집한 상자 수 — 1/4 의 분자.
+int32 AXRPawn::GetChestCollectedCount() const
+{
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UEncyclopediaSubsystem* Enc = GI->GetSubsystem<UEncyclopediaSubsystem>())
+		{
+			return Enc->GetChestCollectedCount();
+		}
+	}
+	return 0;
 }
 
 // 소나음을 2D로 1회 재생하면서, 그동안 배경음을 끄고 사운드 길이만큼 뒤에 다시 켠다.
@@ -505,6 +926,41 @@ void AXRPawn::PlaySonarDetectSound()
 // ── 소나(BP_Scanner) — Y 버튼 (보내준 BP의 T키 로직과 동일) ────────────────────
 //  - 아직 소나가 없으면: 폰 위치에 BP_Scanner 스폰 (첫 입력 = 소환만)  [BP: Spawned? = false]
 //  - 이미 있으면: 소나를 폰 위치로 이동(텔레포트) 후 DoScan 호출        [BP: Spawned? = true]
+// 상호작용(왼쪽 트리거): 상호작용 범위 안에 있는 문들 중 가장 가까운 것을 연다.
+void AXRPawn::Input_Interact()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	TArray<AActor*> Doors;
+	UGameplayStatics::GetAllActorsOfClass(World, ADoor::StaticClass(), Doors);
+
+	const FVector MyLoc = GetActorLocation();
+	ADoor* Best = nullptr;
+	float BestDistSq = TNumericLimits<float>::Max();
+	for (AActor* A : Doors)
+	{
+		ADoor* Door = Cast<ADoor>(A);
+		if (Door && Door->IsPlayerInRange()) // 문이 자체 트리거로 "플레이어 근접" 판정
+		{
+			const float DistSq = FVector::DistSquared(MyLoc, Door->GetActorLocation());
+			if (DistSq < BestDistSq)
+			{
+				BestDistSq = DistSq;
+				Best = Door;
+			}
+		}
+	}
+
+	if (Best)
+	{
+		Best->OpenDoor();
+	}
+}
+
 void AXRPawn::Input_SpawnSonar()
 {
 	if (!GetWorld())
@@ -625,6 +1081,12 @@ void AXRPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 		{
 			EnhancedInputComp->BindAction(SpawnSonarAction, ETriggerEvent::Started, this, &AXRPawn::Input_SpawnSonar);
 		}
+
+		// 상호작용 (왼쪽 트리거) — 누를 때 1회, 범위 안 문 열기
+		if (InteractAction)
+		{
+			EnhancedInputComp->BindAction(InteractAction, ETriggerEvent::Started, this, &AXRPawn::Input_Interact);
+		}
 	}
 }
 
@@ -670,6 +1132,12 @@ void AXRPawn::StopDash()
 
 void AXRPawn::Input_Move(const FInputActionValue& Value)
 {
+	// 엔딩 연출 중엔 조이스틱 이동 무시(완전 시네마틱). DisableInput 백업 안전장치.
+	if (bEndingActive)
+	{
+		return;
+	}
+
 	// 조이스틱의 Vector2D 값 가져오기
 	FVector2D MoveVector = Value.Get<FVector2D>();
 
@@ -724,16 +1192,17 @@ void AXRPawn::StopScan()
 {
 	bScanActive = false;
 
-	// 스캔 진행 중에 트리거를 떼면(취소) → 도망/사운드 정지 + 진행중 UI 숨김 신호(OnScanReset).
-	// (이걸 안 부르면 진행도 UI 가 화면에 남아 안 사라진다.)
+	// 스캔 진행 중에 트리거를 떼면(취소) → 하이라이트/도망/사운드 정지 + 진행중 UI 숨김 신호(OnScanReset).
+	// (이걸 안 부르면 진행도 UI 와 스캔 하이라이트가 화면에 남아 안 사라진다.)
 	if (CurrentScanTarget)
 	{
-		SetFishFleeing(CurrentScanTarget, false); // 쫓던 물고기 도망 멈춤
-		SetScanLoopSound(false);                  // 루프 사운드 정지 + 배경음 재개
+		SetScanHighlight(CurrentScanTarget, false); // 스캔 하이라이트 벗기기
+		SetFishFleeing(CurrentScanTarget, false);   // 쫓던 물고기 도망 멈춤
+		SetScanLoopSound(false);                    // 루프 사운드 정지 + 배경음 재개
 		CurrentScanTarget = nullptr;
 		ScanProgress = 0.0f;
 		ScanPercent = 0.0f;
-		OnScanReset();                            // 진행중 UI 숨김
+		OnScanReset();                              // 진행중 UI 숨김
 	}
 
 	if (bShowScanDebug && GEngine)
@@ -743,10 +1212,133 @@ void AXRPawn::StopScan()
 }
 
 // ── 홀로그램 도감 입력 ───────────────────────────────────────────────────────
-// 오른손 B = 열기/닫기. 실제 동작은 블루프린트의 OnToggleEncyclopedia 에서 구현.
+// 오른손 B = 열기/닫기. 상태·텍스트는 C++ 가 들고, 홀로그램 "메쉬"만 블루프린트의 OnToggleEncyclopedia 에서 처리.
 void AXRPawn::Input_EncyclopediaToggle()
 {
-	OnToggleEncyclopedia();
+	// 열림/닫힘 상태를 뒤집는다 (C++ 가 상태의 주인 — BP 는 상태 bool 을 따로 들 필요 없음).
+	bEncyclopediaOpen = !bEncyclopediaOpen;
+
+	// 손목 시계: 둘 중 하나만 보이게 한다.
+	//  - 열림 → "현재 수심"(DepthText) OFF, 도감 텍스트(Name/Stage/Depth) ON
+	//  - 닫힘 → 반대
+	if (DepthText)
+	{
+		DepthText->SetVisibility(!bEncyclopediaOpen);
+	}
+	if (EncyclopediaTextRoot)
+	{
+		EncyclopediaTextRoot->SetVisibility(bEncyclopediaOpen, /*bPropagateToChildren=*/true);
+	}
+
+	// 홀로그램 표시/숨김 — C++ 가 직접 (BeginPlay 에서 이미 스폰/부착해둠). BP 배선 불필요.
+	if (HologramInstance)
+	{
+		HologramInstance->SetActorHiddenInGame(!bEncyclopediaOpen);
+	}
+
+	// 열리는 순간 현재 행으로 텍스트 + 홀로그램 메쉬를 채운다.
+	if (bEncyclopediaOpen)
+	{
+		RefreshEncyclopediaText();
+	}
+
+	// (호환용 — 추가 연출이 필요하면 BP 에서 구현해도 됨. 없어도 동작함)
+	OnToggleEncyclopedia(bEncyclopediaOpen);
+}
+
+// 현재 행 인덱스로 세 텍스트(Name/Stage/Depth)를 채운다. 도감 라이브러리 헬퍼 하나로 한글폰트까지 처리.
+void AXRPawn::RefreshEncyclopediaText()
+{
+	const TArray<FName> Rows = EncyclopediaTable ? EncyclopediaTable->GetRowNames() : TArray<FName>();
+	if (Rows.Num() == 0)
+	{
+		// 테이블/행 없음 → 라이브러리가 이름 칸에 사유를 표시하도록 None 으로 호출.
+		UEncyclopediaLibrary::ShowEncyclopediaFields(EncyNameText, EncyStageText, EncyDepthText, EncyclopediaTable, NAME_None, EncyclopediaFont);
+		return;
+	}
+
+	EncyclopediaRowIndex = FMath::Clamp(EncyclopediaRowIndex, 0, Rows.Num() - 1);
+	const FName CurrentRow = Rows[EncyclopediaRowIndex];
+	UEncyclopediaLibrary::ShowEncyclopediaFields(EncyNameText, EncyStageText, EncyDepthText, EncyclopediaTable, CurrentRow, EncyclopediaFont);
+
+	// 세 텍스트 모두 시계 폭(EncyNameMaxWidth)에 맞춰 글자 크기를 자동 축소한다(짧으면 최대 크기 유지).
+	//   - 이름: 최대 EncyNameMaxSize / 스테이지·깊이: 최대 EncyInfoSize
+	UEncyclopediaLibrary::FitTextRenderToWidth(EncyNameText,  EncyNameMaxWidth, EncyNameMaxSize, EncyNameMinSize);
+	UEncyclopediaLibrary::FitTextRenderToWidth(EncyStageText, EncyNameMaxWidth, EncyInfoSize,    EncyNameMinSize);
+	UEncyclopediaLibrary::FitTextRenderToWidth(EncyDepthText, EncyNameMaxWidth, EncyInfoSize,    EncyNameMinSize);
+
+	// 같은 행의 메쉬로 홀로그램 모델을 교체 — C++ 가 직접 (이름과 항상 같은 행 보장).
+	USkeletalMesh* Model = UEncyclopediaLibrary::GetRowModelMesh(EncyclopediaTable, CurrentRow);
+	if (HologramFishMesh)
+	{
+		// 모델이 있을 때만 교체 → 모델 없는 행은 기존(기본) 메쉬 유지.
+		if (Model)
+		{
+			HologramFishMesh->SetSkeletalMeshAsset(Model);
+		}
+
+		// 수집 여부에 따라 머티리얼: 수집됨 → 원래 머티리얼 / 미수집 → 홀로그램(유령) 머티리얼.
+		bool bCollected = false;
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UEncyclopediaSubsystem* Ency = GI->GetSubsystem<UEncyclopediaSubsystem>())
+			{
+				bCollected = Ency->IsCollected(CurrentRow);
+			}
+		}
+
+		if (bCollected || !HologramMaterial)
+		{
+			// 원래(메쉬 기본) 머티리얼로 복귀 — 컴포넌트 오버라이드 제거.
+			HologramFishMesh->EmptyOverrideMaterials();
+		}
+		else
+		{
+			// 전 슬롯을 홀로그램 머티리얼로 덮어쓴다.
+			const int32 NumMats = HologramFishMesh->GetNumMaterials();
+			for (int32 i = 0; i < NumMats; ++i)
+			{
+				HologramFishMesh->SetMaterial(i, HologramMaterial);
+			}
+		}
+	}
+
+	// (호환용 — BP 에서 추가로 뭔가 하고 싶을 때만 사용. 없어도 동작함)
+	OnEncyclopediaRowChanged(CurrentRow, Model);
+}
+
+// 페이지 이동(+1/-1) — 도감이 열려 있을 때만. 인덱스 클램프 후 텍스트 갱신, 그리고 BP(메쉬 갱신용)에 알림.
+void AXRPawn::AdvanceEncyclopediaPage(int32 Direction)
+{
+	if (!bEncyclopediaOpen || Direction == 0)
+	{
+		return; // 도감이 닫혀 있으면 페이지 입력 무시
+	}
+
+	const int32 Count = EncyclopediaTable ? EncyclopediaTable->GetRowNames().Num() : 0;
+	if (Count > 0)
+	{
+		// 양 끝에서 반대편으로 순환: 0에서 이전 → 마지막, 마지막에서 다음 → 0.
+		// (음수 Direction 도 안전하도록 +Count 후 한 번 더 %Count)
+		EncyclopediaRowIndex = ((EncyclopediaRowIndex + Direction) % Count + Count) % Count;
+	}
+
+	RefreshEncyclopediaText();
+
+	// BP 에 알림: 현재 행에 맞춰 홀로그램 메쉬/모델을 바꾸고 싶을 때 사용.
+	// 어떤 행인지는 GetCurrentEncyclopediaRowName() 으로 읽으면 된다.
+	OnEncyclopediaPage(Direction);
+}
+
+// 현재 보고 있는 도감 행 이름. (BP 가 메쉬/모델 갱신에 사용)
+FName AXRPawn::GetCurrentEncyclopediaRowName() const
+{
+	if (!EncyclopediaTable)
+	{
+		return NAME_None;
+	}
+	const TArray<FName> Rows = EncyclopediaTable->GetRowNames();
+	return Rows.IsValidIndex(EncyclopediaRowIndex) ? Rows[EncyclopediaRowIndex] : NAME_None;
 }
 
 // 오른손 썸스틱 X = 페이지 넘김.
@@ -764,7 +1356,7 @@ void AXRPawn::Input_EncyclopediaPage(const FInputActionValue& Value)
 	else if (!bPageFlickEngaged && FMath::Abs(Axis) >= FireThreshold)
 	{
 		bPageFlickEngaged = true;
-		OnEncyclopediaPage(Axis > 0.0f ? 1 : -1); // 오른쪽=다음(+1), 왼쪽=이전(-1)
+		AdvanceEncyclopediaPage(Axis > 0.0f ? 1 : -1); // 오른쪽=다음(+1), 왼쪽=이전(-1). 내부에서 인덱스+텍스트+BP알림 처리
 	}
 }
 
@@ -813,7 +1405,7 @@ int32 AXRPawn::ConsumeAxisFlick(float AxisValue, float FireThreshold, float Rese
 
 // ── 홀로그램 손 따라다니기 ───────────────────────────────────────────────────
 // 홀로그램 액터를 손 컨트롤러에 붙인다. 붙는 순간부터 손을 따라 같이 움직인다(매 틱 코드 불필요).
-void AXRPawn::AttachHologramToHand(AActor* Hologram, bool bRightHand, FVector LocalOffset)
+void AXRPawn::AttachHologramToHand(AActor* Hologram, bool bRightHand, const FTransform& LocalTransform)
 {
 	if (!Hologram)
 	{
@@ -826,9 +1418,9 @@ void AXRPawn::AttachHologramToHand(AActor* Hologram, bool bRightHand, FVector Lo
 		return;
 	}
 
-	// 손 위치/회전에 스냅해서 붙인 뒤, LocalOffset 만큼 손에서 떨어뜨린다.
+	// 손에 붙인 뒤, 손 기준 상대 트랜스폼(위치+회전+스케일)을 그대로 적용한다.
 	Hologram->AttachToComponent(Hand, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-	Hologram->SetActorRelativeLocation(LocalOffset);
+	Hologram->SetActorRelativeTransform(LocalTransform);
 }
 
 // 손에서 떼어내 지금 있는 자리(월드 위치)에 그대로 둔다.

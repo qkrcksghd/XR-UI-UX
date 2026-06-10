@@ -8,11 +8,17 @@
 #include "Engine/SkeletalMesh.h"
 #include "Animation/AnimSequenceBase.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/SceneComponent.h"
 #include "CollisionQueryParams.h"
 
 AFishSpawner::AFishSpawner()
 {
 	PrimaryActorTick.bCanEverTick = false;
+
+	// 루트 씬 컴포넌트 — 이게 있어야 레벨에서 위치를 갖고(기즈모로) 움직일 수 있다.
+	// 스폰 위치(GetActorLocation)의 기준이기도 하다.
+	USceneComponent* SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
+	SetRootComponent(SceneRoot);
 
 	// 기본 제외: jellyfish
 	ExcludeRows.Add(FName(TEXT("jellyfish")));
@@ -39,6 +45,38 @@ bool AFishSpawner::IsExcluded(FName RowName) const
 		}
 	}
 	return false;
+}
+
+bool AFishSpawner::IsIncluded(FName RowName) const
+{
+	// 화이트리스트가 비어있으면 "전부 포함"(기존 동작).
+	if (IncludeOnlyRows.Num() == 0)
+	{
+		return true;
+	}
+	const FName Key = UEncyclopediaLibrary::ToCanonicalKey(RowName);
+	for (const FName& In : IncludeOnlyRows)
+	{
+		if (UEncyclopediaLibrary::ToCanonicalKey(In) == Key)
+		{
+			return true;
+		}
+	}
+	return false; // 목록이 있는데 거기 없으면 이 스포너는 안 만든다
+}
+
+FRotator AFishSpawner::GetMeshRotationForRow(FName RowName) const
+{
+	// 종별 지정이 있으면 그걸, 없으면 공통값.
+	const FName Key = UEncyclopediaLibrary::ToCanonicalKey(RowName);
+	for (const TPair<FName, FRotator>& Pair : MeshRotationPerSpecies)
+	{
+		if (UEncyclopediaLibrary::ToCanonicalKey(Pair.Key) == Key)
+		{
+			return Pair.Value;
+		}
+	}
+	return MeshRotationOffset;
 }
 
 float AFishSpawner::GetEffectiveSurfaceZ() const
@@ -106,14 +144,24 @@ int32 AFishSpawner::SpawnAllFish()
 	const TArray<FName> RowNames = EncyclopediaTable->GetRowNames();
 	for (const FName& Row : RowNames)
 	{
-		if (IsExcluded(Row))
+		if (IsExcluded(Row) || !IsIncluded(Row))
 		{
-			continue;
+			continue; // 제외됐거나, 화이트리스트가 있는데 거기 없으면 스킵
 		}
 
 		// 수심 범위(minDepth~maxDepth). min/max 없으면 단일 Depth 로 폴백(Min==Max), 그것도 없으면 0(수면).
 		float MinDepth = 0.0f, MaxDepth = 0.0f;
-		UEncyclopediaLibrary::GetRowDepthRange(EncyclopediaTable, Row, MinDepth, MaxDepth);
+		const bool bGotRange = UEncyclopediaLibrary::GetRowDepthRange(EncyclopediaTable, Row, MinDepth, MaxDepth);
+
+		// 진단: 행별로 읽힌 수심범위 + UnitsPerMeter + 실제 Z 범위를 화면에 출력(bDebugSpawn 켜야 보임).
+		if (bDebugSpawn && GEngine)
+		{
+			const float Surf = GetEffectiveSurfaceZ();
+			GEngine->AddOnScreenDebugMessage(-1, 20.0f, FColor::Yellow,
+				FString::Printf(TEXT("[%s] range=%d  %.1f~%.1f m | UPM=%.3f Surf=%.0f | Z %.0f~%.0f"),
+					*Row.ToString(), bGotRange ? 1 : 0, MinDepth, MaxDepth, UnitsPerMeter, Surf,
+					Surf - MaxDepth * UnitsPerMeter, Surf - MinDepth * UnitsPerMeter));
+		}
 
 		const int32 Count = GetSpawnCountForRow(Row);
 		for (int32 i = 0; i < Count; ++i)
@@ -230,12 +278,21 @@ AActor* AFishSpawner::SpawnOneFish(FName RowName, FVector Location)
 		USkeletalMeshComponent* SkComp = Spawned->FindComponentByClass<USkeletalMeshComponent>();
 		if (!SkComp)
 		{
+			// 씬 루트 + 메쉬 자식 구조. 이렇게 해야 헤엄이 액터(루트)를 회전시켜도
+			// 메쉬만 따로 정면축 보정(MeshRotationOffset)이 안 덮이고 유지된다.
+			USceneComponent* RootComp = NewObject<USceneComponent>(Spawned, TEXT("FishRoot"));
+			if (RootComp)
+			{
+				Spawned->SetRootComponent(RootComp);
+				RootComp->RegisterComponent();
+				RootComp->SetWorldTransform(SpawnTM);
+			}
+
 			SkComp = NewObject<USkeletalMeshComponent>(Spawned, TEXT("FishMesh"));
 			if (SkComp)
 			{
-				Spawned->SetRootComponent(SkComp);
+				SkComp->SetupAttachment(RootComp);
 				SkComp->RegisterComponent();
-				SkComp->SetWorldTransform(SpawnTM);
 			}
 		}
 
@@ -267,13 +324,19 @@ AActor* AFishSpawner::SpawnOneFish(FName RowName, FVector Location)
 	Spawned->Tags.AddUnique(FName(TEXT("Fish")));
 	UEncyclopediaLibrary::SetActorFishRowName(Spawned, RowName);
 
+#if WITH_EDITOR
+	// 아웃라이너에서 종 이름(lure, shark…)으로 보이게 → 검색/마릿수 확인 편하게. 에디터 전용.
+	Spawned->SetActorLabel(RowName.ToString());
+#endif
+
 	// 헤엄+벽회피 컴포넌트 자동 부착
 	if (bAddSwimComponent)
 	{
 		if (UFishSwimComponent* Swim = NewObject<UFishSwimComponent>(Spawned, TEXT("FishSwim")))
 		{
 			Swim->SwimSpeed = SwimSpeed;
-			Swim->MeshYawOffset = MeshYawOffset;
+			// 메시 정면축 보정: generic 물고기만(종별 BP 는 BP 가 방향 책임지므로 건드리지 않음).
+			Swim->MeshRotationOffset = bSpeciesBP ? FRotator::ZeroRotator : GetMeshRotationForRow(RowName);
 
 			// 이 종의 수심대(Z 범위) 안에 가두기
 			if (bClampToDepthBand)

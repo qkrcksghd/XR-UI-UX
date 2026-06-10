@@ -91,6 +91,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FishSpawner|Placement")
 	TArray<FName> ExcludeRows;
 
+	/** 화이트리스트: 비어있지 않으면 "이 행들만" 스폰한다(나머지는 전부 스킵).
+	 *  예: 깊은 협곡 전용 스포너에 [lure, shark] 만 넣으면 그 둘만 여기서 생성.
+	 *  비워두면(기본) 제외목록 빼고 전부 스폰. ExcludeRows 와 같이 쓰면 둘 다 적용(포함 ∧ 비제외). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FishSpawner|Placement")
+	TArray<FName> IncludeOnlyRows;
+
 	/** BeginPlay 에 자동으로 전부 스폰할지. 끄면 SpawnAllFish 를 직접 호출. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FishSpawner")
 	bool bSpawnOnBeginPlay = true;
@@ -108,9 +114,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FishSpawner|Swim")
 	float SwimSpeed = 120.0f;
 
-	/** 메시 정면 보정(도). 물고기가 옆/뒤로 헤엄치는 것처럼 보이면 90/-90/180 으로 맞춘다. */
+	/** 메시 정면 보정(모든 종 공통, Pitch/Yaw/Roll 도). 물고기가 옆/뒤/위로 헤엄치는 것처럼 보이면 돌려 맞춘다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FishSpawner|Swim")
-	float MeshYawOffset = 0.0f;
+	FRotator MeshRotationOffset = FRotator::ZeroRotator;
+
+	/** 종별 메시 정면 보정(이 맵에 있으면 위 공통값 대신 사용). 예: lure 만 (0,90,0) 처럼 따로 돌릴 때.
+	 *  키 = 행 이름(대소문자/접두어 무시), 값 = Pitch/Yaw/Roll(도). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FishSpawner|Swim")
+	TMap<FName, FRotator> MeshRotationPerSpecies;
 
 	/** 각 물고기를 자기 종의 수심대(minDepth~maxDepth → Z) 안에 머물게 한다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FishSpawner|Swim")
@@ -129,6 +140,12 @@ private:
 
 	// 제외 목록에 포함되는 행인지(표준키 비교).
 	bool IsExcluded(FName RowName) const;
+
+	// 이 스포너가 이 행을 스폰해야 하는지(IncludeOnlyRows 비었으면 항상 true, 아니면 목록에 있을 때만).
+	bool IsIncluded(FName RowName) const;
+
+	// 이 행에 쓸 메시 정면 보정 회전(종별 지정 있으면 그 값, 없으면 공통 MeshRotationOffset).
+	FRotator GetMeshRotationForRow(FName RowName) const;
 
 	// 이 행을 몇 마리 스폰할지(개별 지정 있으면 그 값, 없으면 CountPerSpecies).
 	int32 GetSpawnCountForRow(FName RowName) const;

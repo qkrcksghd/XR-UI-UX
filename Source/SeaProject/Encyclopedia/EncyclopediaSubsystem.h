@@ -38,8 +38,28 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Encyclopedia")
 	int32 GetCollectedCount() const;
 
+	// ── 보물상자(히든 퀘스트) 수집 ─────────────────────────────────────
+	// 물고기와 별개의 집합. 키는 상자 액터의 고유 이름(예: "Chest_of_Gold_2")을 그대로 쓴다.
+	// (물고기처럼 표준화하면 "_2" 같은 번호가 잘려 서로 다른 상자가 같은 키로 합쳐지므로 표준화하지 않는다.)
+
+	/** 해당 상자를 "수집됨"으로 등록한다. (상자 고유 키 — 그대로 저장) */
+	UFUNCTION(BlueprintCallable, Category = "Encyclopedia")
+	void MarkChestCollected(FName ChestKey);
+
+	/** 해당 상자가 이미 수집됐는지. */
+	UFUNCTION(BlueprintPure, Category = "Encyclopedia")
+	bool IsChestCollected(FName ChestKey) const;
+
+	/** 지금까지 수집한 상자 수(1/4 의 분자). */
+	UFUNCTION(BlueprintPure, Category = "Encyclopedia")
+	int32 GetChestCollectedCount() const;
+
 private:
 	// 표준화된 키 집합(예: "shark", "clione"...)
 	UPROPERTY()
 	TSet<FName> CollectedKeys;
+
+	// 수집한 상자 키 집합(상자 액터 고유 이름 그대로 저장).
+	UPROPERTY()
+	TSet<FName> CollectedChestKeys;
 };

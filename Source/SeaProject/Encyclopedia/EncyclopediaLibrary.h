@@ -68,6 +68,27 @@ public:
 	static bool ShowEncyclopediaText(UTextRenderComponent* Target, const UDataTable* DataTable, FName RowName, UFont* KoreanFont = nullptr, AActor* FishActor = nullptr);
 
 	/**
+	 * 위 ShowEncyclopediaText 와 같지만, "이름 / 스테이지 / 깊이" 를 한 줄로 합치지 않고
+	 * 세 개의 TextRender 컴포넌트에 따로 표시한다(홀로그램처럼 Name/Stage/Depth 를 분리 배치할 때).
+	 * 각 대상은 nullptr 이어도 되며(그 항목은 건너뜀), 한글 폰트는 세 컴포넌트 모두에 적용한다.
+	 *   - NameText  → 종 이름(없으면 행 이름)
+	 *   - StageText → "스테이지 N" (StageLevel 필드 없으면 빈 텍스트)
+	 *   - DepthText → "깊이 Nm"   (minDepth/maxDepth 있으면 중간값, 없으면 단일 Depth)
+	 *
+	 * @return  행을 찾아 표시에 성공하면 true.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Encyclopedia")
+	static bool ShowEncyclopediaFields(UTextRenderComponent* NameText, UTextRenderComponent* StageText, UTextRenderComponent* DepthText, const UDataTable* DataTable, FName RowName, UFont* KoreanFont = nullptr, AActor* FishActor = nullptr);
+
+	/**
+	 * TextRender 의 글자 크기(World Size)를 자동 조절해, 가로 폭이 MaxWidth(언리얼 로컬 단위, cm) 를
+	 * 넘지 않게 맞춘다. 짧으면 MaxSize 그대로, 길면 MinSize 까지 비례해서 줄인다.
+	 * (긴 물고기 이름이 시계 화면 밖으로 나가는 것을 방지) — 호출 전에 텍스트/폰트가 세팅돼 있어야 정확하다.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Encyclopedia")
+	static void FitTextRenderToWidth(UTextRenderComponent* Text, float MaxWidth, float MaxSize, float MinSize = 1.0f);
+
+	/**
 	 * 도감 한 행을 "이름 / 스테이지 / 깊이" 형식 FText 로 조립해서 돌려준다.
 	 * (TextRender 말고 UMG Text Block 등에 직접 쓰고 싶을 때 사용. 폰트는 위젯에서 지정)
 	 */

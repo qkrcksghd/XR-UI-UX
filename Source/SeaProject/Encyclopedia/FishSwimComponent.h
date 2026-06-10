@@ -91,10 +91,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FishSwim")
 	float VerticalRange = 400.0f;
 
-	/** 메시 정면이 +X 가 아닐 때 보정(도). 물고기가 옆/뒤로 가는 것처럼 보이면 90 / -90 / 180 으로 맞춘다.
-	 *  (이동은 액터 +X 기준 그대로, 메시 비주얼만 회전시켜 정면을 맞춤) */
+	/** 메시 정면이 +X 가 아닐 때 보정(Pitch/Yaw/Roll, 도). 물고기가 옆/뒤/위로 가는 것처럼 보이면
+	 *  여기서 돌려 맞춘다. (이동은 액터 +X 기준 그대로, 메시 비주얼만 회전) — 종마다 다르면 스포너에서 종별 지정. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FishSwim")
-	float MeshYawOffset = 0.0f;
+	FRotator MeshRotationOffset = FRotator::ZeroRotator;
 
 	/** 디버그: 이동 방향(정면)을 화살표로 표시. 메시 코가 이 화살표를 향하게 MeshYawOffset 을 맞추면 됨. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FishSwim")

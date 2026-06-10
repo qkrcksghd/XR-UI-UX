@@ -27,3 +27,22 @@ int32 UEncyclopediaSubsystem::GetCollectedCount() const
 {
 	return CollectedKeys.Num();
 }
+
+void UEncyclopediaSubsystem::MarkChestCollected(FName ChestKey)
+{
+	// 상자 키는 표준화하지 않고 그대로 저장(번호가 잘려 합쳐지는 것 방지).
+	if (!ChestKey.IsNone())
+	{
+		CollectedChestKeys.Add(ChestKey);
+	}
+}
+
+bool UEncyclopediaSubsystem::IsChestCollected(FName ChestKey) const
+{
+	return !ChestKey.IsNone() && CollectedChestKeys.Contains(ChestKey);
+}
+
+int32 UEncyclopediaSubsystem::GetChestCollectedCount() const
+{
+	return CollectedChestKeys.Num();
+}

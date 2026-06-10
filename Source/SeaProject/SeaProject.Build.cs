@@ -17,7 +17,8 @@ public class SeaProject : ModuleRules
 			"EnhancedInput",
 			"HeadMountedDisplay",
 			"XRBase",
-			"UMG"           // 시작 화면: World 위젯 컴포넌트 + 레이저(WidgetInteraction)
+			"UMG",          // 시작 화면: World 위젯 컴포넌트 + 레이저(WidgetInteraction)
+			"Niagara"       // 보물상자 수집 완료 VFX(나이아가라) 스폰
 		});
 
         PrivateDependencyModuleNames.AddRange(new string[] {  });

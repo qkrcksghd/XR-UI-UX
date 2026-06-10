@@ -131,6 +131,47 @@ namespace
 		return S;
 	}
 
+	// 한글 폰트를 결정한다. 인자로 받은 게 있으면 그대로, 없으면 "약속된 경로"에서 찾아본다(없으면 nullptr).
+	// TextRender 기본 폰트(Roboto)엔 한글 글리프가 없어서, 한글을 보이려면 이 폰트가 필요하다.
+	UFont* ResolveKoreanFont(UFont* InFont)
+	{
+		if (InFont)
+		{
+			return InFont;
+		}
+		static const TCHAR* CandidatePaths[] =
+		{
+			TEXT("/Game/UI/F_KoreanFont.F_KoreanFont"),
+			TEXT("/Game/UI/Fonts/F_KoreanFont.F_KoreanFont"),
+			TEXT("/Game/CH/F_KoreanFont.F_KoreanFont"),
+		};
+		for (const TCHAR* Path : CandidatePaths)
+		{
+			if (UFont* Found = LoadObject<UFont>(nullptr, Path))
+			{
+				return Found;
+			}
+		}
+		return nullptr;
+	}
+
+	// 행의 수심 표시 문자열: minDepth/maxDepth 가 있으면 중간값(반올림), 없으면 단일 Depth. 둘 다 없으면 빈 문자열.
+	FString BuildDepthDisplay(const UScriptStruct* RowStruct, const uint8* RowData)
+	{
+		FString MinStr, MaxStr;
+		const bool bHasMin = ReadFieldAsString(RowStruct, RowData, TEXT("minDepth"), MinStr) && !MinStr.IsEmpty();
+		const bool bHasMax = ReadFieldAsString(RowStruct, RowData, TEXT("maxDepth"), MaxStr) && !MaxStr.IsEmpty();
+		if (bHasMin || bHasMax)
+		{
+			const float Mn = bHasMin ? FCString::Atof(*MinStr) : FCString::Atof(*MaxStr);
+			const float Mx = bHasMax ? FCString::Atof(*MaxStr) : FCString::Atof(*MinStr);
+			return FString::FromInt(FMath::RoundToInt((Mn + Mx) * 0.5f)); // 중간값(반올림)
+		}
+		FString DepthStr;
+		ReadFieldAsString(RowStruct, RowData, TEXT("Depth"), DepthStr); // 폴백: 단일 Depth
+		return TidyNumber(DepthStr);
+	}
+
 	// 두 문자열의 레벤슈타인(편집) 거리. 오타 1글자 판정용.
 	int32 EditDistance(const FString& A, const FString& B)
 	{
@@ -314,10 +355,9 @@ FText UEncyclopediaLibrary::BuildEncyclopediaText(const UDataTable* DataTable, F
 	}
 
 	// 순서대로: 이름 → 스테이지 → 깊이
-	FString NameStr, StageStr, DepthStr;
+	FString NameStr, StageStr;
 	ReadFieldAsString(RowStruct, RowData, TEXT("Name"), NameStr);
 	ReadFieldAsString(RowStruct, RowData, TEXT("StageLevel"), StageStr);
-	ReadFieldAsString(RowStruct, RowData, TEXT("Depth"), DepthStr);
 
 	// 이름이 비어 있으면 행 이름이라도 보여준다.
 	if (NameStr.IsEmpty())
@@ -329,26 +369,13 @@ FText UEncyclopediaLibrary::BuildEncyclopediaText(const UDataTable* DataTable, F
 	Lines.Add(NameStr);
 	if (!StageStr.IsEmpty())
 	{
-		Lines.Add(FString::Printf(TEXT("스테이지 %s"), *TidyNumber(StageStr)));
+		Lines.Add(FString::Printf(TEXT("Level %s"), *TidyNumber(StageStr)));
 	}
 	// 수심: minDepth/maxDepth 가 있으면 그 중간값을 표시, 없으면 단일 Depth.
-	FString MinStr, MaxStr;
-	const bool bHasMin = ReadFieldAsString(RowStruct, RowData, TEXT("minDepth"), MinStr) && !MinStr.IsEmpty();
-	const bool bHasMax = ReadFieldAsString(RowStruct, RowData, TEXT("maxDepth"), MaxStr) && !MaxStr.IsEmpty();
-	FString DepthDisplay;
-	if (bHasMin || bHasMax)
-	{
-		const float Mn = bHasMin ? FCString::Atof(*MinStr) : FCString::Atof(*MaxStr);
-		const float Mx = bHasMax ? FCString::Atof(*MaxStr) : FCString::Atof(*MinStr);
-		DepthDisplay = FString::FromInt(FMath::RoundToInt((Mn + Mx) * 0.5f)); // 중간값(반올림)
-	}
-	else
-	{
-		DepthDisplay = TidyNumber(DepthStr); // 폴백: 단일 Depth
-	}
+	const FString DepthDisplay = BuildDepthDisplay(RowStruct, RowData);
 	if (!DepthDisplay.IsEmpty())
 	{
-		Lines.Add(FString::Printf(TEXT("깊이 %sm"), *DepthDisplay));
+		Lines.Add(FString::Printf(TEXT("Depth %sm"), *DepthDisplay));
 	}
 
 	return FText::FromString(FString::Join(Lines, TEXT("\n")));
@@ -362,25 +389,8 @@ bool UEncyclopediaLibrary::ShowEncyclopediaText(UTextRenderComponent* Target, co
 	}
 
 	// 1) 한글 폰트 적용 — 이게 있어야 TextRender 에 한글이 보인다(기본 Roboto엔 한글 글리프가 없음).
-	//    노드에 폰트를 꽂아주면 그걸 쓰고, 안 꽂았으면 아래 "약속된 경로"에서 자동으로 찾아 적용한다.
-	//    → 한글 폰트(TTF)를 에디터에서 import 해서 아래 경로 중 하나에 두기만 하면 BP 수정 없이 한글이 나온다.
-	if (!KoreanFont)
-	{
-		static const TCHAR* CandidatePaths[] =
-		{
-			TEXT("/Game/UI/F_KoreanFont.F_KoreanFont"),
-			TEXT("/Game/UI/Fonts/F_KoreanFont.F_KoreanFont"),
-			TEXT("/Game/CH/F_KoreanFont.F_KoreanFont"),
-		};
-		for (const TCHAR* Path : CandidatePaths)
-		{
-			if (UFont* Found = LoadObject<UFont>(nullptr, Path))
-			{
-				KoreanFont = Found;
-				break;
-			}
-		}
-	}
+	//    노드에 폰트를 꽂아주면 그걸 쓰고, 안 꽂았으면 "약속된 경로"에서 자동으로 찾아 적용한다.
+	KoreanFont = ResolveKoreanFont(KoreanFont);
 	if (KoreanFont)
 	{
 		Target->SetFont(KoreanFont);
@@ -393,6 +403,80 @@ bool UEncyclopediaLibrary::ShowEncyclopediaText(UTextRenderComponent* Target, co
 	// 행을 정상적으로 찾았는지 여부 반환
 	const FName Resolved = ResolveEncyclopediaRowName(DataTable, RowName, FishActor);
 	return !Resolved.IsNone();
+}
+
+bool UEncyclopediaLibrary::ShowEncyclopediaFields(UTextRenderComponent* NameText, UTextRenderComponent* StageText, UTextRenderComponent* DepthText, const UDataTable* DataTable, FName RowName, UFont* KoreanFont, AActor* FishActor)
+{
+	// 한글이 들어갈 수 있는 건 "이름"뿐이라, 한글 폰트는 이름 텍스트에만 적용한다.
+	// Stage/Depth 는 "Level N"/"Depth Nm" ASCII 라 폰트를 건드리지 않는다(에디터에서 지정한 폰트 유지).
+	KoreanFont = ResolveKoreanFont(KoreanFont);
+	if (KoreanFont && NameText)
+	{
+		NameText->SetFont(KoreanFont);
+	}
+
+	const FName Resolved = DataTable ? ResolveEncyclopediaRowName(DataTable, RowName, FishActor) : NAME_None;
+	const UScriptStruct* RowStruct = DataTable ? DataTable->GetRowStruct() : nullptr;
+	const uint8* RowData = (DataTable && !Resolved.IsNone()) ? DataTable->FindRowUnchecked(Resolved) : nullptr;
+
+	// 행을 못 찾으면 이름 칸에만 사유를 띄우고, 나머지는 비운다.
+	if (!RowStruct || !RowData)
+	{
+		const FText Reason = FText::FromString(DataTable ? TEXT("(도감 데이터 없음)") : TEXT("(도감 테이블 없음)"));
+		if (NameText)  { NameText->SetText(Reason); }
+		if (StageText) { StageText->SetText(FText::GetEmpty()); }
+		if (DepthText) { DepthText->SetText(FText::GetEmpty()); }
+		return false;
+	}
+
+	// 이름 (없으면 행 이름으로 폴백)
+	if (NameText)
+	{
+		FString NameStr;
+		ReadFieldAsString(RowStruct, RowData, TEXT("Name"), NameStr);
+		if (NameStr.IsEmpty()) { NameStr = Resolved.ToString(); }
+		NameText->SetText(FText::FromString(NameStr));
+	}
+
+	// 스테이지 ("스테이지 N" — StageLevel 없으면 빈 텍스트)
+	if (StageText)
+	{
+		FString StageStr;
+		ReadFieldAsString(RowStruct, RowData, TEXT("StageLevel"), StageStr);
+		StageText->SetText(StageStr.IsEmpty()
+			? FText::GetEmpty()
+			: FText::FromString(FString::Printf(TEXT("Level %s"), *TidyNumber(StageStr))));
+	}
+
+	// 깊이 ("깊이 Nm" — min/max 중간값 또는 단일 Depth, 없으면 빈 텍스트)
+	if (DepthText)
+	{
+		const FString DepthDisplay = BuildDepthDisplay(RowStruct, RowData);
+		DepthText->SetText(DepthDisplay.IsEmpty()
+			? FText::GetEmpty()
+			: FText::FromString(FString::Printf(TEXT("Depth %sm"), *DepthDisplay)));
+	}
+
+	return true;
+}
+
+void UEncyclopediaLibrary::FitTextRenderToWidth(UTextRenderComponent* Text, float MaxWidth, float MaxSize, float MinSize)
+{
+	if (!Text || MaxWidth <= 0.0f || MaxSize <= 0.0f)
+	{
+		return;
+	}
+
+	// 최대 크기로 둔 상태에서 실제 렌더 가로 폭을 잰다(GetTextLocalSize: Y=가로, Z=세로).
+	Text->SetWorldSize(MaxSize);
+	const float Width = Text->GetTextLocalSize().Y;
+
+	// 폭을 넘으면 비례 축소(최소 MinSize). 측정이 0(폰트/등록 전)이면 그대로 MaxSize 유지.
+	if (Width > MaxWidth)
+	{
+		const float Fitted = FMath::Max(MinSize, MaxSize * (MaxWidth / Width));
+		Text->SetWorldSize(Fitted);
+	}
 }
 
 // ── 자동 스폰용 행 읽기 헬퍼 ──────────────────────────────────────────────────
@@ -602,35 +686,63 @@ UAnimSequenceBase* UEncyclopediaLibrary::GetRowAnimSequence(const UDataTable* Da
 
 FName UEncyclopediaLibrary::GetActorFishRowName(AActor* Actor)
 {
-	FProperty* Prop = FindFishRowNameProp(Actor);
-	if (!Prop)
+	if (!Actor)
 	{
 		return NAME_None;
 	}
-	const void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Actor);
-	if (const FNameProperty* NameProp = CastField<FNameProperty>(Prop))
+
+	// 1) BP 변수 "FishRowName" 이 있으면 그걸 읽는다(종별 BP/BP_FishBase).
+	if (FProperty* Prop = FindFishRowNameProp(Actor))
 	{
-		return NameProp->GetPropertyValue(ValuePtr);
+		const void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Actor);
+		if (const FNameProperty* NameProp = CastField<FNameProperty>(Prop))
+		{
+			const FName N = NameProp->GetPropertyValue(ValuePtr);
+			if (!N.IsNone()) { return N; }
+		}
+		else if (const FStrProperty* StrProp = CastField<FStrProperty>(Prop))
+		{
+			const FString S = StrProp->GetPropertyValue(ValuePtr);
+			if (!S.IsEmpty()) { return FName(*S); }
+		}
+		else if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
+		{
+			const FString S = TextProp->GetPropertyValue(ValuePtr).ToString();
+			if (!S.IsEmpty()) { return FName(*S); }
+		}
 	}
-	if (const FStrProperty* StrProp = CastField<FStrProperty>(Prop))
+
+	// 2) 폴백: "FishRow=종이름" 태그에서 읽는다(변수가 없는 제네릭 물고기 = plain AActor).
+	for (const FName& Tag : Actor->Tags)
 	{
-		const FString S = StrProp->GetPropertyValue(ValuePtr);
-		return S.IsEmpty() ? NAME_None : FName(*S);
-	}
-	if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
-	{
-		const FString S = TextProp->GetPropertyValue(ValuePtr).ToString();
-		return S.IsEmpty() ? NAME_None : FName(*S);
+		const FString S = Tag.ToString();
+		if (S.StartsWith(TEXT("FishRow=")))
+		{
+			const FString RowStr = S.RightChop(8); // "FishRow=" 길이 8
+			return RowStr.IsEmpty() ? NAME_None : FName(*RowStr);
+		}
 	}
 	return NAME_None;
 }
 
 bool UEncyclopediaLibrary::SetActorFishRowName(AActor* Actor, FName RowName)
 {
+	if (!Actor)
+	{
+		return false;
+	}
+
+	// 제네릭 물고기(FishRowName 변수가 없는 plain AActor)도 종을 알 수 있게 태그로도 각인.
+	// (GetActorFishRowName 의 폴백이 이 태그를 읽는다 → 스캔 수집/도감 등록이 된다)
+	if (!RowName.IsNone())
+	{
+		Actor->Tags.AddUnique(FName(*FString::Printf(TEXT("FishRow=%s"), *RowName.ToString())));
+	}
+
 	FProperty* Prop = FindFishRowNameProp(Actor);
 	if (!Prop)
 	{
-		return false;
+		return false; // 변수는 없지만 위에서 태그로 각인했으니 등록은 가능
 	}
 	void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Actor);
 	if (FNameProperty* NameProp = CastField<FNameProperty>(Prop))

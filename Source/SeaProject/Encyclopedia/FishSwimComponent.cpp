@@ -21,11 +21,12 @@ void UFishSwimComponent::BeginPlay()
 		TargetRot = Owner->GetActorRotation();
 
 		// 메시 정면 보정: 메시 컴포넌트만 회전시켜 비주얼 정면을 액터 +X 에 맞춘다.
-		if (!FMath::IsNearlyZero(MeshYawOffset))
+		// (generic 물고기는 메쉬가 씬 루트의 자식이라, 여기서 메쉬만 돌려도 액터 회전에 안 덮인다)
+		if (!MeshRotationOffset.IsNearlyZero())
 		{
 			if (USkeletalMeshComponent* SkComp = Owner->FindComponentByClass<USkeletalMeshComponent>())
 			{
-				SkComp->SetRelativeRotation(FRotator(0.0f, MeshYawOffset, 0.0f));
+				SkComp->SetRelativeRotation(MeshRotationOffset);
 			}
 		}
 	}
