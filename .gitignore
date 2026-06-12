@@ -14,6 +14,7 @@ Saved/
 *.suo
 *.tmp
 *.log
+발표자료/
 .DS_Store
 Thumbs.db
 
@@ -33,3 +34,6 @@ Thumbs.db
 /Content/StaticMesh/
 
 # (필요시) 개별 대용량 파일을 더 빼려면 아래에 경로 추가
+
+# Presentation materials
+/발표자료/
