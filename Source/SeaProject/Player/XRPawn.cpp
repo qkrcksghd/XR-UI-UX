@@ -261,7 +261,7 @@ void AXRPawn::Tick(float DeltaTime)
 				{
 					PC->PlayerCameraManager->StartCameraFade(
 						0.0f, 1.0f, FMath::Max(0.1f, EndingFadeDuration),
-						EndingFadeColor, /*bFadeAudio=*/true, /*bHoldWhenFinished=*/true);
+						EndingFadeColor, /*bFadeAudio=*/false, /*bHoldWhenFinished=*/true);
 				}
 			}
 			OnReachedSurface(); // BP: 크레딧 등 추가 연출(선택)
